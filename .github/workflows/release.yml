@@ -51,7 +51,7 @@ jobs:
         env:
           # Renovate bumps this via the '# mavericks-golang' customManager in .github/renovate.json
           # (github-releases on ModernMavericks/golang). Verified against golang's published SHA256SUMS.
-          GO_PKG_REF: 1.26.4-mavericks.2  # mavericks-golang
+          GO_PKG_REF: 1.26.4-mavericks.3  # mavericks-golang
         run: |
           ver="$GO_PKG_REF"
           pkg="go126-${ver%%-mavericks.*}-cross-${ver#*-}.pkg"
