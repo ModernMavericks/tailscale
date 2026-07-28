@@ -1,0 +1,176 @@
+name: release
+
+# Cross-build the three 10.9-compatible Go binaries (tailscaled + tailscale CLI + tailscale-systray)
+# and the Sparkle updater on macos-26, assemble + EdDSA-sign the product .pkg, render the signed
+# appcast, and attach the .pkg + appcast to a GitHub Release. Tags only -- every push/PR is validated
+# by ci.yml; this workflow only runs on a <version>-mavericks.<rev> tag (or a manual dispatch, which
+# builds an artifact but does not publish). All-or-nothing: the single `publish` job is the only writer
+# to Releases and it `needs` package, so a build failure never ships a partial release.
+
+on:
+  push:
+    tags: ['*-mavericks.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false   # each tag is a unique ref; never cancel a publish mid-flight
+
+jobs:
+  build-macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install mavericks-shared-cmake
+        uses: ModernMavericks/shared-cmake/.github/actions/install@v1
+
+      - name: Version = VERSION file (tag must match)
+        id: ver
+        run: |
+          VER=$(cat VERSION)
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          # Tag equals VERSION (no leading v), e.g. 1.102.0-mavericks.1.
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "$VER" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} != $VER (VERSION file)"; exit 1; fi
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ ! -s "release-notes/$VER.md" ]; then
+            echo "::error::release-notes/$VER.md missing or empty"; exit 1; fi
+
+      - name: Install patched Go (mavericks-golang cross toolchain)
+        env:
+          # Renovate bumps this via the '# mavericks-golang' customManager (matches ci.yml + release.yml).
+          GO_PKG_REF: 1.26.4-mavericks.3  # mavericks-golang
+        run: |
+          ver="$GO_PKG_REF"
+          pkg="go126-${ver%%-mavericks.*}-cross-${ver#*-}.pkg"
+          base="https://github.com/ModernMavericks/golang/releases/download/${ver}"
+          curl -fL --retry 3 -o "$pkg" "$base/$pkg"
+          curl -fL --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+          sum=$(awk -v f="$pkg" '$2==f' SHA256SUMS)
+          [ -n "$sum" ] || { echo "::error::$pkg missing from golang SHA256SUMS"; exit 1; }
+          printf '%s\n' "$sum" | shasum -a 256 -c -
+          sudo installer -pkg "$pkg" -target /
+          echo "/usr/local/go126-cross/bin" >> "$GITHUB_PATH"
+
+      - name: Confirm the patched cross toolchain is on PATH
+        run: |
+          test "$(command -v go)" = /usr/local/go126-cross/bin/go
+          go version
+
+      - name: Cache the MacOSX10.9 SDK
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.sdk-cache
+          key: macosx10.9-sdk-v1
+
+      - name: Build + gate the three Go binaries (x86_64 / min-10.9 / no post-10.9 imports)
+        env:
+          MAVERICKS_SDK_CACHE: ${{ github.workspace }}/.sdk-cache
+        run: |
+          cmake --preset cross
+          cmake --build --preset cross
+          ctest --preset cross
+
+      - name: Build the Sparkle updater (must not link tailscale)
+        run: |
+          cmake -S updater -B build/updater -DCMAKE_OBJC_COMPILER=/usr/bin/clang
+          cmake --build build/updater
+          BIN=build/updater/TailscaleUpdater.app/Contents/MacOS/TailscaleUpdater
+          otool -L "$BIN" | tee /tmp/o.txt
+          if otool -L "$BIN" | tail -n +2 | grep -iq tailscale; then
+            echo "::error::updater links a tailscale product (self-update circularity)"; exit 1; fi
+
+      # Bundle the packaging inputs into ONE tarball so executable bits (the binaries, the updater .app's
+      # Mach-Os) survive the artifact round-trip -- artifacts otherwise drop file modes.
+      - name: Stage + upload packaging inputs
+        run: |
+          export COPYFILE_DISABLE=1
+          mkdir -p stage
+          cp build-cross/gobin/tailscaled       stage/tailscaled
+          cp build-cross/gobin/tailscale        stage/tailscale
+          cp build-cross/gobin/tailscale-systray stage/tailscale-systray
+          cp -R build/updater/TailscaleUpdater.app stage/TailscaleUpdater.app
+          find stage -name '._*' -delete 2>/dev/null || true
+          tar -C stage -czf packaging-inputs.tgz .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packaging-inputs
+          path: packaging-inputs.tgz
+
+  # Assemble + sign the product .pkg and render the signed appcast. Runs on macos-26 for
+  # pkgbuild/productbuild + the shared signer.
+  package:
+    if: github.ref_type == 'tag'
+    needs: [build-macos]
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install mavericks-shared-cmake
+        uses: ModernMavericks/shared-cmake/.github/actions/install@v1
+      - uses: actions/download-artifact@v8
+        with: { name: packaging-inputs, path: dl }
+
+      - name: Assemble + sign the .pkg, render the appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}   # sign_and_appcast.sh fetches ed25519-sign via `gh`
+        run: |
+          [ -n "$SPARKLE_PRIVATE_KEY" ] || { echo "::error::SPARKLE_PRIVATE_KEY secret not set"; exit 1; }
+          SH="$(cat "$HOME/.cmake/packages/MavericksSharedCMake/"* | head -1)/scripts"
+          [ -d "$SH" ] || { echo "::error::shared-cmake scripts not found at $SH"; exit 1; }
+          VER=$(cat VERSION)
+          mkdir -p in dist
+          tar -C in -xzf dl/packaging-inputs.tgz          # restores executable bits
+          # Wrap the systray binary into the menu-bar .app the package expects.
+          sh cmake/make_app.sh in/tailscale-systray in/Tailscale.app "$VER"
+          PKG="dist/tailscale-$VER.pkg"
+
+          # dist/ in the repo holds the LaunchDaemon/Agent plists + pre/postinstall scripts.
+          MSC_SCRIPTS="$SH" sh cmake/package_pkg.sh --out "$PKG" --version "$VER" \
+            --tailscaled in/tailscaled --tailscale in/tailscale \
+            --systray-app in/Tailscale.app --updater-app in/TailscaleUpdater.app \
+            --daemon-plist "$GITHUB_WORKSPACE/dist/com.tailscale.tailscaled.plist" \
+            --systray-agent "$GITHUB_WORKSPACE/dist/com.tailscale.systray.plist" \
+            --dist "$GITHUB_WORKSPACE/dist"
+
+          # Verify the 10.9.5 floor on the CI-built .pkg before signing/publishing.
+          W=$(mktemp -d); pkgutil --expand "$PKG" "$W/x"
+          grep -q '<os-version min="10.9.5"/>' "$W/x/Distribution" \
+            || { echo "::error::.pkg is missing the 10.9.5 install floor"; exit 1; }
+
+          # Sign the .pkg + render the signed appcast (auto-fetches the prebuilt ed25519-sign). The
+          # enclosure points at the versioned release asset; the client /latest/ feed resolves to this
+          # full release immediately, so Sparkle clients pick it up right away.
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/$VER/$(basename "$PKG")"
+          sh "$SH/sign_and_appcast.sh" \
+            --channel-title "Tailscale for Mavericks" \
+            --version "$VER" --pkg-url "$URL" --min-os 10.9.5 \
+            --notes-file "release-notes/$VER.md" --pkg "$PKG" > dist/appcast.xml
+          (cd dist && shasum -a 256 ./*.pkg > SHA256SUMS)
+          echo "=== appcast.xml ==="; cat dist/appcast.xml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tailscale-pkg
+          path: |
+            dist/*.pkg
+            dist/appcast.xml
+            dist/SHA256SUMS
+
+  # All-or-nothing publish: the ONLY writer to Releases, gated on package.
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with: { path: dist, merge-multiple: true }
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*.pkg
+            dist/appcast.xml
+            dist/SHA256SUMS

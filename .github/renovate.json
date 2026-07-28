@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>ModernMavericks/shared-cmake"],
+  "packageRules": [
+    {
+      "description": "Track only STABLE upstream Tailscale (even minor version, per tailscale's release convention); never an unstable v1.99.x.",
+      "matchDepNames": ["tailscale-source"],
+      "allowedVersions": "/^v?\\d+\\.\\d*[02468]\\.\\d+$/"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the tailscale source pin against upstream tailscale/tailscale release tags. A REF bump (e.g. v1.102.0 -> v1.104.0) waits for ci.yml (platformAutomerge:false) before auto-merge, then release-on-bump.yml auto-cuts the MM tag (forward-only).",
+      "managerFilePatterns": ["/^components/tailscale/version$/"],
+      "matchStrings": ["REPO=https://github.com/(?<packageName>\\S+?)(?:\\.git)?\\s*\\nREF=(?<currentValue>v\\S+)"],
+      "depNameTemplate": "tailscale-source",
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/(ci|release)\\.yml$/"],
+      "matchStrings": ["(?<currentValue>[0-9][^\\s#\"']*)\\s*#\\s*mavericks-golang"],
+      "depNameTemplate": "mavericks-golang",
+      "packageNameTemplate": "ModernMavericks/golang",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v?(?<version>.+)$",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-mavericks\\.(?<build>\\d+)$"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+name: release-on-bump
+
+# Auto-cut a ModernMavericks release when the tailscale source pin (components/tailscale/version)
+# moves forward to a newer upstream Tailscale. Derives VERSION=<upstream>-mavericks.1 from the pinned
+# source's VERSION.txt, commits it + a release-notes stub, and pushes the tag <VERSION> -- which
+# release.yml turns into a published .pkg + signed appcast. Zero human step for a genuine upstream bump.
+#
+# FORWARD-ONLY GUARD: releases only when the pinned upstream is strictly newer than the current
+# VERSION's upstream. So a pin edit that points at an older or equal upstream tag is treated as a
+# no-op here -- never an auto-published downgrade. Same-upstream repackages (-mavericks.<rev> > 1)
+# stay manual by design.
+
+on:
+  push:
+    branches: [main]
+    paths: ['components/tailscale/version']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-on-bump
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+
+      - name: Derive upstream from the pinned source and cut a tag if it moved forward
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          # Read the pin (REPO + REF). BRANCH= line, if present, is Renovate metadata and ignored here.
+          REPO=$(sed -n 's/^REPO=//p' components/tailscale/version)
+          REF=$(sed -n 's/^REF=//p' components/tailscale/version)
+          [ -n "$REPO" ] && [ -n "$REF" ] || { echo "::error::malformed components/tailscale/version"; exit 1; }
+
+          # owner/repo from the clone URL -> raw VERSION.txt at the pinned commit (no clone needed).
+          slug=$(printf '%s' "$REPO" | sed -E 's#^https?://github.com/##; s#\.git$##')
+          UP=$(curl -fsSL "https://raw.githubusercontent.com/$slug/$REF/VERSION.txt" | tr -d '[:space:]')
+          case "$UP" in
+            [0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "::error::could not read a sane upstream version from the pinned source (got '$UP')"; exit 1;;
+          esac
+
+          CUR=$(cat VERSION)                 # e.g. 1.98.8-mavericks.1
+          CUR_UP=${CUR%%-mavericks.*}        # 1.98.8
+          NEWVER="${UP}-mavericks.1"
+
+          # Forward-only: pinned upstream must be strictly greater than the shipped upstream.
+          newest=$(printf '%s\n%s\n' "$CUR_UP" "$UP" | sort -V | tail -1)
+          if [ "$UP" = "$CUR_UP" ] || [ "$newest" != "$UP" ]; then
+            echo "pin upstream $UP is not ahead of shipped $CUR_UP -- no auto-release (manual repackage if intended)."
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/$NEWVER" >/dev/null 2>&1 \
+             || git ls-remote --exit-code --tags origin "$NEWVER" >/dev/null 2>&1; then
+            echo "tag $NEWVER already exists -- nothing to do."; exit 0
+          fi
+
+          echo "cutting $NEWVER (upstream $CUR_UP -> $UP)"
+          printf '%s\n' "$NEWVER" > VERSION
+          NOTES="release-notes/$NEWVER.md"
+          if [ ! -s "$NOTES" ]; then
+            {
+              echo "ModernMavericks Tailscale $NEWVER."
+              echo
+              echo "- Tracks upstream Tailscale **$UP**, built with the ModernMavericks go126 toolchain"
+              echo "  (x86_64, minimum-10.9, compat_guard-gated)."
+              echo "- Automatically cut from the tailscale source pin bump; review before promoting if desired."
+            } > "$NOTES"
+          fi
+
+          git config user.name  "modernmavericks-bot"
+          git config user.email "bot@modernmavericks.dev"
+          git add VERSION "$NOTES"
+          git commit -m "release: auto-cut $NEWVER (upstream $UP)"
+          git push origin HEAD:main
+          git tag "$NEWVER"
+          git push origin "$NEWVER"

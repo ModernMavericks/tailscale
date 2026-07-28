@@ -1,0 +1,78 @@
+name: CI
+
+# Validate every push and PR: cross-build the three 10.9 Go binaries + the Sparkle updater on
+# macos-26 and run the compat gate. No publishing here — releases happen only on
+# <version>-mavericks.<rev> tags (see release.yml).
+#
+# This is also the check that gates Renovate: every dependency-bump PR runs this, and Renovate is
+# configured (platformAutomerge:false) to wait for it to go green before auto-merging — so a bump that
+# breaks the cross-build never lands on main. No branch protection required.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Cross-build + compat gate (macos-26)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      # shared-cmake self-registers in the CMake user package registry; consumed via find_package.
+      - name: Install mavericks-shared-cmake
+        uses: ModernMavericks/shared-cmake/.github/actions/install@v1
+
+      # The 10.9-correct Go toolchain (mavericks-golang go126 cross .pkg; its go.env CC wrapper supplies
+      # the 10.9 SDK + target flags + legacy shim + -Wl,-U allowances). Cross mode: the root CMakeLists
+      # picks `go` from PATH.
+      - name: Install patched Go (mavericks-golang cross toolchain)
+        env:
+          # Renovate bumps this via the '# mavericks-golang' customManager in .github/renovate.json
+          # (matches ci.yml + release.yml). Verified against golang's published SHA256SUMS.
+          GO_PKG_REF: 1.26.4-mavericks.3  # mavericks-golang
+        run: |
+          ver="$GO_PKG_REF"
+          pkg="go126-${ver%%-mavericks.*}-cross-${ver#*-}.pkg"
+          base="https://github.com/ModernMavericks/golang/releases/download/${ver}"
+          curl -fL --retry 3 -o "$pkg" "$base/$pkg"
+          curl -fL --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+          sum=$(awk -v f="$pkg" '$2==f' SHA256SUMS)
+          [ -n "$sum" ] || { echo "::error::$pkg missing from golang SHA256SUMS"; exit 1; }
+          printf '%s\n' "$sum" | shasum -a 256 -c -
+          sudo installer -pkg "$pkg" -target /
+          echo "/usr/local/go126-cross/bin" >> "$GITHUB_PATH"
+
+      - name: Confirm the patched cross toolchain is on PATH
+        run: |
+          test "$(command -v go)" = /usr/local/go126-cross/bin/go
+          go version
+
+      - name: Cache the MacOSX10.9 SDK
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.sdk-cache
+          key: macosx10.9-sdk-v1
+
+      - name: Build + gate the three Go binaries (x86_64 / min-10.9 / no post-10.9 imports)
+        env:
+          MAVERICKS_SDK_CACHE: ${{ github.workspace }}/.sdk-cache
+        run: |
+          cmake --preset cross
+          cmake --build --preset cross
+          ctest --preset cross
+
+      # Sparkle updater .app: built every run (catches updater breaks). It must NOT link any Tailscale
+      # product (self-update circularity); its own binary is TailscaleUpdater, so skip line 1 of otool.
+      - name: Build the Sparkle updater (must not link tailscale)
+        run: |
+          cmake -S updater -B build/updater -DCMAKE_OBJC_COMPILER=/usr/bin/clang
+          cmake --build build/updater
+          BIN=build/updater/TailscaleUpdater.app/Contents/MacOS/TailscaleUpdater
+          otool -L "$BIN" | tee /tmp/o.txt
+          if otool -L "$BIN" | tail -n +2 | grep -iq tailscale; then
+            echo "::error::updater links a tailscale product (self-update circularity)"; exit 1; fi
