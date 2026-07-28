@@ -1,0 +1,17 @@
+tailscale-updater.icns is Tailscale's official logo mark, from the Tailscale website
+favicon (https://tailscale.com/favicon.png, 768x768, retrieved 2026-07-27), rendered to
+a standard multi-resolution AppIcon set with `sips` and packed with `iconutil -c icns`.
+
+Using the official Tailscale icon is fine here: this is a faithful repackage of the
+upstream Tailscale client (only 10.9 build/compat shims, no behavior changes), the same
+way distro/Homebrew/pkgsrc packages ship upstream branding. Tailscale's own code even
+anticipates third-party packagers via hostinfo.SetPackage() (we set "ModernMavericks").
+The client's BSD-3-Clause license covers the code; the icon is a trademark, so we use it
+nominatively to identify the genuine Tailscale client and mark the build "unofficial
+community build" (see the release notes). If zero-ambiguity is ever wanted, get written
+OK from Tailscale (support@tailscale.com).
+
+To regenerate: fetch the source PNG, then
+  sips -z <sz> <sz> src.png --out AppIcon.iconset/icon_<name>.png   # for each standard size
+  iconutil -c icns AppIcon.iconset -o tailscale-updater.icns
+Keep this note updated if the source asset changes.
