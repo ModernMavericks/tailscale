@@ -1,0 +1,2 @@
+REPO=https://github.com/tailscale/tailscale.git
+REF=v1.98.8
