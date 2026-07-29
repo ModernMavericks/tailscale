@@ -42,7 +42,7 @@ jobs:
       - name: Install patched Go (mavericks-golang cross toolchain)
         env:
           # Renovate bumps this via the '# mavericks-golang' customManager (matches ci.yml + release.yml).
-          GO_PKG_REF: 1.26.4-mavericks.3  # mavericks-golang
+          GO_PKG_REF: 1.26.5-mavericks.1  # mavericks-golang
         run: |
           ver="$GO_PKG_REF"
           base="https://github.com/ModernMavericks/golang/releases/download/${ver}"
