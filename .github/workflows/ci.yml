@@ -34,7 +34,7 @@ jobs:
         env:
           # Renovate bumps this via the '# mavericks-golang' customManager in .github/renovate.json
           # (matches ci.yml + release.yml). Verified against golang's published SHA256SUMS.
-          GO_PKG_REF: 1.26.4-mavericks.3  # mavericks-golang
+          GO_PKG_REF: 1.26.5-mavericks.1  # mavericks-golang
         run: |
           ver="$GO_PKG_REF"
           base="https://github.com/ModernMavericks/golang/releases/download/${ver}"
