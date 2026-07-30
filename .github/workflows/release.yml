@@ -2,42 +2,88 @@ name: release
 
 # Cross-build the three 10.9-compatible Go binaries (tailscaled + tailscale CLI + tailscale-systray)
 # and the Sparkle updater on macos-26, assemble + EdDSA-sign the product .pkg, render the signed
-# appcast, and attach the .pkg + appcast to a GitHub Release. Tags only -- every push/PR is validated
-# by ci.yml; this workflow only runs on a <version>-mavericks.<rev> tag (or a manual dispatch, which
-# builds an artifact but does not publish). All-or-nothing: the single `publish` job is the only writer
-# to Releases and it `needs` package, so a build failure never ships a partial release.
+# appcast, and attach the .pkg + appcast to a GitHub Release. Every push/PR is validated by ci.yml;
+# this workflow publishes from two entry points:
+#   - a <version>-mavericks.<rev> tag (must match the committed VERSION file), or
+#   - workflow_dispatch with local_release=true: a same-upstream -mavericks.(N+1) REPACKAGE, cut and
+#     published inline (the tag is minted by the publish step, no push needed). This is what
+#     repackage-on-ingredient-bump.yml dispatches when a build ingredient pin moves.
+# A plain dispatch (local_release=false) builds and gates without publishing.
+# All-or-nothing: the single `publish` job is the only writer to Releases and it `needs` package, so
+# a build failure never ships a partial release.
 
 on:
   push:
     tags: ['*-mavericks.*']
   workflow_dispatch:
+    inputs:
+      local_release:
+        description: "Cut+publish a -mavericks.(N+1) repackage (same upstream, rebuilt with current ingredients)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+# Each tag is a unique ref, so a publish build is never cancelled. Dispatch runs all share
+# refs/heads/main, so they get a group per run id -- a repackage must never be cancelled by, or
+# cancel, another one.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false   # each tag is a unique ref; never cancel a publish mid-flight
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-macos:
     runs-on: macos-26
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      publish: ${{ steps.ver.outputs.publish }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # a local_release repackage counts existing <upstream>-mavericks.* tags
 
       - name: Install mavericks-shared-cmake
         uses: ModernMavericks/shared-cmake/.github/actions/install@v1
 
-      - name: Version = VERSION file (tag must match)
+      # Decides two things: what VER is, and whether this run publishes.
+      #   - a *-mavericks.* tag: VER = the tag (must match the committed VERSION file); publish=yes.
+      #   - workflow_dispatch(local_release=true): VER = <same upstream>-mavericks.(N+1) where N is the
+      #     highest EXISTING tag for this upstream -- derived from tags, not from the VERSION file, so
+      #     repeated repackages keep advancing even though a dispatch-cut version is never committed
+      #     back. publish=yes. Written to the local VERSION file (not committed) so this job's own
+      #     cmake configure and the updater bundle embed the repackage's real version.
+      #   - anything else (plain dispatch): VER = the committed VERSION file; publish=no.
+      - name: Decide version + whether this run publishes
         id: ver
         run: |
-          VER=$(cat VERSION)
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            VER="${GITHUB_REF_NAME}"
+            FILEVER=$(cat VERSION)
+            if [ "$VER" != "$FILEVER" ]; then
+              echo "::error::tag $VER != VERSION file $FILEVER"; exit 1; fi
+            if [ ! -s "release-notes/$VER.md" ]; then
+              echo "::error::release-notes/$VER.md missing or empty"; exit 1; fi
+            PUBLISH=true
+          elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${{ inputs.local_release }}" = "true" ]; then
+            CUR=$(cat VERSION)
+            UP="${CUR%%-mavericks.*}"; N="${CUR##*-mavericks.}"
+            case "$N" in ''|*[!0-9]*) echo "::error::unexpected VERSION '$CUR'"; exit 1;; esac
+            for t in $(git tag --list "${UP}-mavericks.*"); do
+              n="${t##*-mavericks.}"
+              case "$n" in ''|*[!0-9]*) continue;; esac
+              [ "$n" -gt "$N" ] && N="$n"
+            done
+            VER="${UP}-mavericks.$((N + 1))"
+            PUBLISH=true
+            printf '%s\n' "$VER" > VERSION
+          else
+            VER=$(cat VERSION)
+            PUBLISH=false
+          fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          # Tag equals VERSION (no leading v), e.g. 1.102.0-mavericks.1.
-          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "$VER" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} != $VER (VERSION file)"; exit 1; fi
-          if [ "${GITHUB_REF_TYPE}" = tag ] && [ ! -s "release-notes/$VER.md" ]; then
-            echo "::error::release-notes/$VER.md missing or empty"; exit 1; fi
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "version=$VER publish=$PUBLISH"
 
       - name: Install patched Go (mavericks-golang cross toolchain)
         run: |
@@ -107,7 +153,7 @@ jobs:
   # Assemble + sign the product .pkg and render the signed appcast. Runs on macos-26 for
   # pkgbuild/productbuild + the shared signer.
   package:
-    if: github.ref_type == 'tag'
+    if: needs.build-macos.outputs.publish == 'true'
     needs: [build-macos]
     runs-on: macos-26
     steps:
@@ -117,15 +163,38 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: packaging-inputs, path: dl }
 
+      # This job's checkout is fresh (a separate runner), so it does NOT see the VERSION mutation
+      # build-macos made for a local_release repackage -- use the version build-macos decided. For the
+      # same reason a freshly-cut repackage has no committed release-notes/$VER.md; stub it so
+      # sign_and_appcast.sh's --notes-file has a non-empty file. (A tag release already validated its
+      # notes exist in build-macos, so this only ever fires for a dispatch-cut repackage.)
+      - name: Ensure release-notes/$VER.md exists
+        env:
+          VER: ${{ needs.build-macos.outputs.version }}
+        run: |
+          NOTES="release-notes/$VER.md"
+          if [ ! -s "$NOTES" ]; then
+            mkdir -p release-notes
+            UP="${VER%%-mavericks.*}"
+            {
+              echo "ModernMavericks Tailscale $VER."
+              echo
+              echo "- Repackage of upstream Tailscale **$UP**, rebuilt with the current build"
+              echo "  ingredients (see components/ for what moved -- typically the ModernMavericks Go"
+              echo "  toolchain). No upstream Tailscale change."
+              echo "- Automatically cut via workflow_dispatch local_release."
+            } > "$NOTES"
+          fi
+
       - name: Assemble + sign the .pkg, render the appcast
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
           GH_TOKEN: ${{ github.token }}   # sign_and_appcast.sh fetches ed25519-sign via `gh`
+          VER: ${{ needs.build-macos.outputs.version }}
         run: |
           [ -n "$SPARKLE_PRIVATE_KEY" ] || { echo "::error::SPARKLE_PRIVATE_KEY secret not set"; exit 1; }
           SH="$(cat "$HOME/.cmake/packages/MavericksSharedCMake/"* | head -1)/scripts"
           [ -d "$SH" ] || { echo "::error::shared-cmake scripts not found at $SH"; exit 1; }
-          VER=$(cat VERSION)
           mkdir -p in dist
           tar -C in -xzf dl/packaging-inputs.tgz          # restores executable bits
           # Wrap the systray binary into the menu-bar .app the package expects.
@@ -163,10 +232,14 @@ jobs:
             dist/appcast.xml
             dist/SHA256SUMS
 
-  # All-or-nothing publish: the ONLY writer to Releases, gated on package.
+  # All-or-nothing publish: the ONLY writer to Releases, gated on package. On a tag push the tag
+  # already exists; on a workflow_dispatch local_release there is no tag yet (and a GITHUB_TOKEN-pushed
+  # tag wouldn't trigger anything anyway) -- explicit tag_name + target_commitish tell
+  # action-gh-release to mint the -mavericks.(N+1) tag at this commit, inline, in the run that
+  # publishes it. No second hop, no push.
   publish:
-    if: github.ref_type == 'tag'
-    needs: [package]
+    if: needs.build-macos.outputs.publish == 'true'
+    needs: [build-macos, package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -174,6 +247,8 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.build-macos.outputs.version }}
+          target_commitish: ${{ github.sha }}
           files: |
             dist/*.pkg
             dist/appcast.xml

@@ -1,0 +1,19 @@
+name: repackage-on-ingredient-bump
+
+# When a build ingredient pin under components/ is bumped by Renovate, dispatch a -mavericks.(N+1)
+# repackage via the shared reusable workflow — release.yml's workflow_dispatch local_release path cuts
+# and publishes it inline. The tailscale source pin is this repo's OWN upstream: a bump there means a
+# NEW upstream (N=1), which is release-on-bump.yml's job, so it's excluded here.
+
+on:
+  push:
+    branches: [main]
+    paths: ['components/**']
+
+jobs:
+  repackage:
+    permissions:
+      actions: write
+    uses: ModernMavericks/shared-cmake/.github/workflows/repackage-on-ingredient-bump.yml@v1
+    with:
+      own-upstream-paths: components/tailscale/version
