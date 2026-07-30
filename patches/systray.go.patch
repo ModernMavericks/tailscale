@@ -1,11 +1,9 @@
-$NetBSD: patch-client_systray_systray.go,v 1.1 2026/07/29 00:00:00 schmonz Exp $
-
 Menu-bar icon only (no "tailscale" text) on macOS; make the systray "Connect"
 action start interactive login on a logged-out node so the login URL opens in
 the system browser (as "tailscale up" would); and add a macOS "Check for
 updates" item that hands off to the bundled ModernMavericks Sparkle updater.
 
---- client/systray/systray.go.orig	2026-07-02 18:59:26.000000000 +0000
+--- client/systray/systray.go.orig
 +++ client/systray/systray.go
 @@ -16,6 +16,7 @@
  	"log"

@@ -33,7 +33,7 @@ cd "$WRK"
 
 # 1. Source patches (pkgsrc -p0 format): accurate old-macOS version report + the ModernMavericks
 #    package stamp. (The pkgsrc go.mod + paths patches are pkgsrc-only and deliberately NOT here.)
-for p in "$ROOT"/patches/patch-*; do echo ">> patch $(basename "$p")"; patch -p0 < "$p"; done
+for p in "$ROOT"/patches/*.patch; do echo ">> patch $(basename "$p")"; patch -p0 < "$p"; done
 
 # 2. Vendor the module graph, then overlay the third-party 10.9-SDK shims into vendor/ (these modules
 #    call Security/Cocoa APIs newer than the 10.9 SDK and won't compile without a version-gated reimpl).

@@ -1,8 +1,6 @@
-$NetBSD: patch-hostinfo_hostinfo__darwin.go,v 1.1 2026/07/14 20:43:31 schmonz Exp $
-
 Accurately report older macOS versions.
 
---- hostinfo/hostinfo_darwin.go.orig	2026-07-02 18:59:26.000000000 +0000
+--- hostinfo/hostinfo_darwin.go.orig
 +++ hostinfo/hostinfo_darwin.go
 @@ -7,7 +7,9 @@ package hostinfo
  
