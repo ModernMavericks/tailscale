@@ -48,12 +48,14 @@ fi
 # 3. Build each binary. -linkmode=external routes even pure-Go binaries through go.env's min-10.9 CC
 #    wrapper (Go 1.26 internal-links them to a 12.0 floor otherwise -- see mavericks-golang).
 export CGO_ENABLED=1 GOARCH=amd64 GOFLAGS=-mod=vendor
-# Stamp BOTH version strings (as pkgsrc net/tailscale does): without shortStamp, tailscale derives the
-# short version from module VCS info -- stripped in our build -- and prints "<ver>-ERR-BuildInfo". short
-# = the clean upstream semver (1.98.8); long = our full 1.98.8-mavericks.1. Package identity is separate
-# (hostinfo.SetPackage("ModernMavericks")).
+# Stamp BOTH version strings to the clean upstream semver (e.g. 1.98.8). Without a stamp, tailscale
+# derives the version from module VCS info -- stripped in our build -- and prints "<ver>-ERR-BuildInfo".
+# We deliberately report the plain upstream version to the control server (Hostinfo.IPNVersion is
+# version.Long()) rather than our full 1.98.8-mavericks.1: like other downstream packages, the
+# package-specific suffix doesn't belong in the version the tailnet sees. Package identity is carried
+# separately by hostinfo.SetPackage("ModernMavericks").
 SHORT=${VER%%-mavericks.*}
-LD="-linkmode=external -X tailscale.com/version.longStamp=$VER -X tailscale.com/version.shortStamp=$SHORT"
+LD="-linkmode=external -X tailscale.com/version.longStamp=$SHORT -X tailscale.com/version.shortStamp=$SHORT"
 for spec in tailscaled:./cmd/tailscaled tailscale:./cmd/tailscale tailscale-systray:./cmd/systray; do
   name=${spec%%:*}; pkg=${spec#*:}
   echo ">> build $name"
