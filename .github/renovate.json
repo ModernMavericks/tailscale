@@ -19,8 +19,9 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/(ci|release)\\.yml$/"],
-      "matchStrings": ["(?<currentValue>[0-9][^\\s#\"']*)\\s*#\\s*mavericks-golang"],
+      "description": "Track the mavericks-golang cross toolchain pin. It lives in a FILE, not a workflow env line, so a bump is a path repackage-on-ingredient-bump.yml can watch and turn into a -mavericks.(N+1) repackage.",
+      "managerFilePatterns": ["/^components/golang/version$/"],
+      "matchStrings": ["^(?<currentValue>.+?)\\s*$"],
       "depNameTemplate": "mavericks-golang",
       "packageNameTemplate": "ModernMavericks/golang",
       "datasourceTemplate": "github-releases",

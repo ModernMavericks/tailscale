@@ -31,12 +31,12 @@ jobs:
       # the 10.9 SDK + target flags + legacy shim + -Wl,-U allowances). Cross mode: the root CMakeLists
       # picks `go` from PATH.
       - name: Install patched Go (mavericks-golang cross toolchain)
-        env:
-          # Renovate bumps this via the '# mavericks-golang' customManager in .github/renovate.json
-          # (matches ci.yml + release.yml). Verified against golang's published SHA256SUMS.
-          GO_PKG_REF: 1.26.5-mavericks.1  # mavericks-golang
         run: |
-          ver="$GO_PKG_REF"
+          # The pin is a FILE (components/golang/version) so a bump is a watchable path: Renovate
+          # bumps it via the '# mavericks-golang' customManager in .github/renovate.json, and
+          # repackage-on-ingredient-bump.yml sees that path change and dispatches a repackage.
+          # Verified against golang's published SHA256SUMS.
+          ver="$(cat components/golang/version)"
           base="https://github.com/ModernMavericks/golang/releases/download/${ver}"
           curl -fL --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
           # golang renamed its cross asset prefix go126- -> golang- at 1.26.5-mavericks.1; accept either.
