@@ -52,17 +52,17 @@ updates" item that hands off to the bundled ModernMavericks Sparkle updater.
  	})
  	menu.rebuildMenu.Enable()
  
-+	// On macOS (the ModernMavericks packaging) offer a manual update check that
-+	// hands off to the bundled Sparkle updater. Launching its executable with
-+	// --user runs Sparkle's interactive check (update dialog, or "you're up to
-+	// date"); the same executable is what the daily LaunchAgent runs with
-+	// --background. Reap the child so a long-lived menu bar app doesn't leave
-+	// zombies across repeated checks.
++	// On macOS (the ModernMavericks packaging) offer a manual update check that hands off to
++	// the bundled Sparkle updater. Launch it via LaunchServices (`open`), NOT a fork+exec of the
++	// executable: Sparkle's package install needs a LaunchServices-launched host, or its privileged
++	// installer can't run — AuthorizationExecuteWithPrivileges fails with -60008. `--user` runs the
++	// interactive check (update dialog, or "you're up to date"); `open` hands off to LaunchServices
++	// and returns, so there's nothing to reap.
 +	if runtime.GOOS == "darwin" {
 +		menu.checkUpdates = systray.AddMenuItem("Check for updates", "")
 +		onClick(ctx, menu.checkUpdates, func(_ context.Context) {
-+			const updater = "/Library/Application Support/ModernMavericks/TailscaleUpdater.app/Contents/MacOS/TailscaleUpdater"
-+			cmd := exec.Command(updater, "--user")
++			const updaterApp = "/Library/Application Support/ModernMavericks/TailscaleUpdater.app"
++			cmd := exec.Command("/usr/bin/open", updaterApp, "--args", "--user")
 +			if err := cmd.Start(); err != nil {
 +				log.Printf("error launching updater: %v", err)
 +				return
