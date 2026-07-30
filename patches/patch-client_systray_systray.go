@@ -1,13 +1,43 @@
 $NetBSD: patch-client_systray_systray.go,v 1.1 2026/07/29 00:00:00 schmonz Exp $
 
-Menu-bar icon only (no "tailscale" text) on macOS, and make the systray
-"Connect" action start interactive login on a logged-out node so the
-login URL opens in the system browser (as "tailscale up" would), instead
-of silently doing nothing.
+Menu-bar icon only (no "tailscale" text) on macOS; make the systray "Connect"
+action start interactive login on a logged-out node so the login URL opens in
+the system browser (as "tailscale up" would); and add a macOS "Check for
+updates" item that hands off to the bundled ModernMavericks Sparkle updater.
 
 --- client/systray/systray.go.orig	2026-07-02 18:59:26.000000000 +0000
 +++ client/systray/systray.go
-@@ -174,7 +174,11 @@
+@@ -16,6 +16,7 @@
+ 	"log"
+ 	"net/http"
+ 	"os"
++	"os/exec"
+ 	"os/signal"
+ 	"runtime"
+ 	"slices"
+@@ -90,13 +91,14 @@
+ 	bgCancel context.CancelFunc
+ 
+ 	// Top-level menu items
+-	connect     *systray.MenuItem
+-	disconnect  *systray.MenuItem
+-	self        *systray.MenuItem
+-	exitNodes   *systray.MenuItem
+-	more        *systray.MenuItem
+-	rebuildMenu *systray.MenuItem
+-	quit        *systray.MenuItem
++	connect      *systray.MenuItem
++	disconnect   *systray.MenuItem
++	self         *systray.MenuItem
++	exitNodes    *systray.MenuItem
++	more         *systray.MenuItem
++	rebuildMenu  *systray.MenuItem
++	checkUpdates *systray.MenuItem
++	quit         *systray.MenuItem
+ 
+ 	rebuildCh  chan struct{} // triggers a menu rebuild
+ 	accountsCh chan ipn.ProfileID
+@@ -174,7 +176,11 @@
  
  	// set initial title, which is used by the systray package as the ID of the StatusNotifierItem.
  	// This value will get overwritten later as the client status changes.
@@ -20,7 +50,34 @@ of silently doing nothing.
  
  	menu.rebuild()
  
-@@ -438,6 +442,17 @@
+@@ -344,6 +350,26 @@
+ 	})
+ 	menu.rebuildMenu.Enable()
+ 
++	// On macOS (the ModernMavericks packaging) offer a manual update check that
++	// hands off to the bundled Sparkle updater. Launching its executable with
++	// --user runs Sparkle's interactive check (update dialog, or "you're up to
++	// date"); the same executable is what the daily LaunchAgent runs with
++	// --background. Reap the child so a long-lived menu bar app doesn't leave
++	// zombies across repeated checks.
++	if runtime.GOOS == "darwin" {
++		menu.checkUpdates = systray.AddMenuItem("Check for updates", "")
++		onClick(ctx, menu.checkUpdates, func(_ context.Context) {
++			const updater = "/Library/Application Support/ModernMavericks/TailscaleUpdater.app/Contents/MacOS/TailscaleUpdater"
++			cmd := exec.Command(updater, "--user")
++			if err := cmd.Start(); err != nil {
++				log.Printf("error launching updater: %v", err)
++				return
++			}
++			go cmd.Wait()
++		})
++		menu.checkUpdates.Enable()
++	}
++
+ 	menu.quit = systray.AddMenuItem("Quit", "Quit the app")
+ 	menu.quit.Enable()
+ 
+@@ -438,6 +464,17 @@
  			if err != nil {
  				log.Printf("error connecting: %v", err)
  			}
