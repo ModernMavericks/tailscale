@@ -13,6 +13,15 @@ CONSOLE_UID=$(stat -f %u /dev/console 2>/dev/null || echo 0)
 CONSOLE_USER=$(stat -f %Su /dev/console 2>/dev/null || echo root)
 if [ "${CONSOLE_UID:-0}" -gt 0 ] && [ "$CONSOLE_USER" != root ]; then
   launchctl asuser "$CONSOLE_UID" launchctl unload /Library/LaunchAgents/com.tailscale.systray.plist 2>/dev/null || true
+  # The old menu-bar process does NOT quit on unload's SIGTERM: the systray's signal handler runs
+  # cleanup but never calls systray.Quit(), so its icon lingers -- and on 10.9 the asuser-nested
+  # unload doesn't reliably signal it anyway. Without this, the `load -w` below starts the new
+  # instance beside the surviving old one and the user sees TWO menu-bar icons. Explicitly stop the
+  # old process (graceful TERM, then a guaranteed KILL) before starting the replacement.
+  SYSTRAY_BIN=/Applications/Tailscale.app/Contents/MacOS/tailscale-systray
+  pkill -TERM -U "$CONSOLE_UID" -f "$SYSTRAY_BIN" 2>/dev/null || true
+  sleep 1
+  pkill -KILL -U "$CONSOLE_UID" -f "$SYSTRAY_BIN" 2>/dev/null || true
   launchctl asuser "$CONSOLE_UID" launchctl load -w /Library/LaunchAgents/com.tailscale.systray.plist 2>/dev/null || true
 fi
 
