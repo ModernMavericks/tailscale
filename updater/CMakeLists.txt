@@ -18,7 +18,7 @@ mavericks_add_updater_app(
   BUNDLE_ID dev.modernmavericks.TailscaleUpdater
   FEED_URL "https://github.com/ModernMavericks/tailscale/releases/latest/download/appcast.xml"
   ED_PUBKEY_FILE "${CMAKE_SOURCE_DIR}/ed25519_key.pub"
-  ICON "${CMAKE_SOURCE_DIR}/tailscale-updater.icns"
+  ICON "${CMAKE_SOURCE_DIR}/../Tailscale.icns"   # shared product icon (also used by the menu-bar Tailscale.app)
   VERSION "${MAVERICKS_TAILSCALE_VERSION}"
   LOG_PREFIX "MavTailscaleUpdater"
   CONFIRM_TITLE "Tailscale for Mavericks updated"
