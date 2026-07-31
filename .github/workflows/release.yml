@@ -33,11 +33,12 @@ on:
 permissions:
   contents: write
 
-# Each tag is a unique ref, so a publish build is never cancelled. Dispatch runs all share
-# refs/heads/main, so they get a group per run id -- a repackage must never be cancelled by, or
-# cancel, another one.
+# Each tag is a unique ref, so a publish build is never cancelled. All DISPATCHES share one group --
+# not one per run id: a per-run key makes concurrency a no-op, and two dispatches (a manual cut racing
+# the ingredient-bump auto-repackage) would each compute -mavericks.(N+1) from the same tags and
+# collide on the tag. One group with cancel-in-progress:false is a version-bump lock: they queue.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && 'dispatch' || github.ref }}
   cancel-in-progress: false
 
 jobs:
