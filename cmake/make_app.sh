@@ -21,8 +21,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Tailscale</string>
-  <key>CFBundleDisplayName</key><string>Tailscale</string>
+  <key>CFBundleName</key><string>Mavericks Tailscale</string>
+  <key>CFBundleDisplayName</key><string>Mavericks Tailscale</string>
   <key>CFBundleIdentifier</key><string>dev.modernmavericks.tailscale-systray</string>
   <key>CFBundleExecutable</key><string>tailscale-systray</string>
 ${ICON_PLIST}  <key>CFBundleVersion</key><string>${VER}</string>

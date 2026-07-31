@@ -14,14 +14,14 @@ include(MavericksSparkle)   # the Sparkle updater .app builder
 file(STRINGS "${CMAKE_SOURCE_DIR}/../VERSION" MAVERICKS_TAILSCALE_VERSION LIMIT_COUNT 1)
 mavericks_add_updater_app(
   NAME TailscaleUpdater
-  PRODUCT_NAME "Tailscale for Mavericks"
+  PRODUCT_NAME "Mavericks Tailscale"
   BUNDLE_ID dev.modernmavericks.TailscaleUpdater
   FEED_URL "https://github.com/ModernMavericks/tailscale/releases/latest/download/appcast.xml"
   ED_PUBKEY_FILE "${CMAKE_SOURCE_DIR}/ed25519_key.pub"
-  ICON "${CMAKE_SOURCE_DIR}/../Tailscale.icns"   # shared product icon (also used by the menu-bar Tailscale.app)
+  ICON "${CMAKE_SOURCE_DIR}/../Tailscale.icns"   # shared product icon (also used by the menu-bar Mavericks Tailscale.app)
   VERSION "${MAVERICKS_TAILSCALE_VERSION}"
   LOG_PREFIX "MavTailscaleUpdater"
-  CONFIRM_TITLE "Tailscale for Mavericks updated"
+  CONFIRM_TITLE "Mavericks Tailscale updated"
   CONFIRM_BODY "The Tailscale daemon, CLI, and menu-bar app were updated; the daemon reloaded."
   RELAUNCH_MARKER "/tmp/.tailscale-updater-relaunched"
   # no PANE_HINT_KEY -> a background-found update posts an NSUserNotification (CLI/menu-bar product)

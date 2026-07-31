@@ -17,11 +17,20 @@ if [ "${CONSOLE_UID:-0}" -gt 0 ] && [ "$CONSOLE_USER" != root ]; then
   # cleanup but never calls systray.Quit(), so its icon lingers -- and on 10.9 the asuser-nested
   # unload doesn't reliably signal it anyway. Without this, the `load -w` below starts the new
   # instance beside the surviving old one and the user sees TWO menu-bar icons. Explicitly stop the
-  # old process (graceful TERM, then a guaranteed KILL) before starting the replacement.
-  SYSTRAY_BIN=/Applications/Tailscale.app/Contents/MacOS/tailscale-systray
-  pkill -TERM -U "$CONSOLE_UID" -f "$SYSTRAY_BIN" 2>/dev/null || true
+  # old process (graceful TERM, then a guaranteed KILL) before starting the replacement. Match the
+  # executable name, NOT the .app path, so this also stops a systray still running from the
+  # pre-rename bundle (/Applications/Tailscale.app) across the app rename.
+  SYSTRAY_EXE='Contents/MacOS/tailscale-systray'
+  pkill -TERM -U "$CONSOLE_UID" -f "$SYSTRAY_EXE" 2>/dev/null || true
   sleep 1
-  pkill -KILL -U "$CONSOLE_UID" -f "$SYSTRAY_BIN" 2>/dev/null || true
+  pkill -KILL -U "$CONSOLE_UID" -f "$SYSTRAY_EXE" 2>/dev/null || true
+  # One-time cleanup of the pre-rename bundle, but ONLY if it is ours (identity-checked, so we never
+  # delete an unrelated /Applications/Tailscale.app).
+  OLD_APP="/Applications/Tailscale.app"
+  if [ -d "$OLD_APP" ] && \
+     [ "$(defaults read "$OLD_APP/Contents/Info" CFBundleIdentifier 2>/dev/null)" = "dev.modernmavericks.tailscale-systray" ]; then
+    rm -rf "$OLD_APP"
+  fi
   launchctl asuser "$CONSOLE_UID" launchctl load -w /Library/LaunchAgents/com.tailscale.systray.plist 2>/dev/null || true
 fi
 

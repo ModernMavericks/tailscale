@@ -266,13 +266,13 @@ jobs:
           mkdir -p in dist
           tar -C in -xzf dl/packaging-inputs.tgz          # restores executable bits
           # Wrap the systray binary into the menu-bar .app the package expects.
-          sh cmake/make_app.sh in/tailscale-systray in/Tailscale.app "$VER" "$GITHUB_WORKSPACE/Tailscale.icns"
+          sh cmake/make_app.sh in/tailscale-systray "in/Mavericks Tailscale.app" "$VER" "$GITHUB_WORKSPACE/Tailscale.icns"
           PKG="dist/tailscale-$VER.pkg"
 
           # dist/ in the repo holds the LaunchDaemon/Agent plists + pre/postinstall scripts.
           MSC_SCRIPTS="$SH" sh cmake/package_pkg.sh --out "$PKG" --version "$VER" \
             --tailscaled in/tailscaled --tailscale in/tailscale \
-            --systray-app in/Tailscale.app --updater-app in/TailscaleUpdater.app \
+            --systray-app "in/Mavericks Tailscale.app" --updater-app in/TailscaleUpdater.app \
             --daemon-plist "$GITHUB_WORKSPACE/dist/com.tailscale.tailscaled.plist" \
             --systray-agent "$GITHUB_WORKSPACE/dist/com.tailscale.systray.plist" \
             --dist "$GITHUB_WORKSPACE/dist"

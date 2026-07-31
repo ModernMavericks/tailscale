@@ -1,5 +1,5 @@
 #!/bin/sh
-# Assemble the (unsigned) Tailscale product .pkg: tailscaled + tailscale CLI + the menu-bar Tailscale.app,
+# Assemble the (unsigned) Tailscale product .pkg: tailscaled + tailscale CLI + the menu-bar Mavericks Tailscale.app,
 # the Sparkle updater (.app + daily update-check LaunchAgent), the daemon LaunchDaemon + systray
 # LaunchAgent, with a hard 10.9.5 install floor. Signing + appcast are separate (shared
 # sign_and_appcast.sh) in the release workflow; this only builds the .pkg. Prints the .pkg path.
@@ -43,7 +43,7 @@ mkdir -p "$stage/usr/local/sbin" "$stage/usr/local/bin" "$stage/Applications" \
          "$stage/Library/LaunchDaemons" "$stage/Library/LaunchAgents"
 install -m 0755 "$TSD" "$stage/usr/local/sbin/tailscaled"
 install -m 0755 "$TS"  "$stage/usr/local/bin/tailscale"
-cp -R "$SYSTRAY" "$stage/Applications/Tailscale.app"
+cp -R "$SYSTRAY" "$stage/Applications/Mavericks Tailscale.app"
 install -m 0644 "$DAEMON" "$stage/Library/LaunchDaemons/com.tailscale.tailscaled.plist"
 install -m 0644 "$AGENT"  "$stage/Library/LaunchAgents/com.tailscale.systray.plist"
 

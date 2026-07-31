@@ -8,7 +8,7 @@
        talks to the daemon over /var/run/tailscaled.socket (its own default), so no flags are needed. -->
   <key>ProgramArguments</key>
   <array>
-    <string>/Applications/Tailscale.app/Contents/MacOS/tailscale-systray</string>
+    <string>/Applications/Mavericks Tailscale.app/Contents/MacOS/tailscale-systray</string>
   </array>
   <key>RunAtLoad</key><true/>
 </dict>
