@@ -58,37 +58,39 @@ jobs:
 
       # Decides three things: what VER is, whether this run publishes, and what kind of release it is.
       #
-      # THE SHIPPED STATE LIVES IN TAGS, not in the committed VERSION file. Every automated cut
-      # publishes with a tag minted at that commit (see the publish job) and never commits VERSION
-      # back -- pushing to main is not available to us, since branch protection requires a status
-      # check no fresh bot commit can have. So the current upstream/N is read from the tags, seeded
-      # from VERSION for the case where no tag exists yet, and each publishing path writes VER into
-      # the local VERSION file (not committed) so this job's cmake configure and the updater bundle
-      # embed the real version.
+      # THE SHIPPED STATE LIVES IN TAGS. Nothing here is committed back -- branch protection requires
+      # a status check no fresh bot commit can have -- so the version is derived, never read from a
+      # committed file. Two derivations, both shared:
+      #   build/derive-upstream-version.sh -> UPSTREAM_VERSION, from the pin's own VERSION.txt
+      #   resolve-version.sh               -> <upstream>-mavericks.N, from that plus the shipped tags,
+      #                                       written to VERSION as a build product so this job's cmake
+      #                                       configure and the updater bundle embed the same string.
       #   - a *-mavericks.* tag: VER = the tag; publish=yes. Committed notes required.
-      #   - workflow_dispatch(upstream_release=true): a NEW upstream -- VER = <pinned upstream>-mavericks.1,
-      #     forward-only against the newest shipped tag; publish=yes. Dispatched by release-on-bump.yml.
-      #   - workflow_dispatch(local_release=true): a REPACKAGE of the shipped upstream --
-      #     VER = <that upstream>-mavericks.(N+1); publish=yes. Dispatched by repackage-on-ingredient-bump.yml.
-      #   - anything else (plain dispatch): VER = the committed VERSION file; publish=no.
+      #   - workflow_dispatch(upstream_release=true): a NEW upstream -- VER = <pinned>-mavericks.1
+      #     (auto mode gives N=1 because that upstream has no tags yet), forward-only against the
+      #     newest shipped tag; publish=yes. Dispatched by release-on-bump.yml.
+      #   - workflow_dispatch(local_release=true): a REPACKAGE -- VER = <upstream>-mavericks.(N+1);
+      #     publish=yes. Dispatched by repackage-on-ingredient-bump.yml.
+      #   - anything else (plain dispatch): the shipped N; publish=no.
       - name: Decide version + whether this run publishes
         id: ver
         run: |
-          CUR=$(cat VERSION)
-          CUR_UP="${CUR%%-mavericks.*}"; CUR_N="${CUR##*-mavericks.}"
-          case "$CUR_N" in ''|*[!0-9]*) CUR_N=0;; esac
-          # Advance to the newest shipped tag (highest upstream, then highest N within it).
+          UP="$(sh build/derive-upstream-version.sh)"
+
+          # Newest upstream among the shipped tags -- the forward-only comparison point. Read from
+          # tags, not from a file: a pin edit pointing at an older tag must be a no-op, not an
+          # auto-published downgrade.
+          SHIPPED_UP=""
           for t in $(git tag --list '*-mavericks.*'); do
-            up="${t%%-mavericks.*}"; n="${t##*-mavericks.}"
-            case "$n" in ''|*[!0-9]*) continue;; esac
-            newest=$(printf '%s\n%s\n' "$CUR_UP" "$up" | sort -V | tail -1)
-            if [ "$up" != "$CUR_UP" ] && [ "$newest" = "$up" ]; then
-              CUR_UP="$up"; CUR_N="$n"
-            elif [ "$up" = "$CUR_UP" ] && [ "$n" -gt "$CUR_N" ]; then
-              CUR_N="$n"
+            u="${t%%-mavericks.*}"
+            if [ -z "$SHIPPED_UP" ]; then
+              SHIPPED_UP="$u"
+            else
+              newest=$(printf '%s\n%s\n' "$SHIPPED_UP" "$u" | sort -V | tail -1)
+              [ "$newest" = "$u" ] && SHIPPED_UP="$u"
             fi
           done
-          echo "shipped: ${CUR_UP}-mavericks.${CUR_N}"
+          echo "pin upstream: $UP    newest shipped upstream: ${SHIPPED_UP:-<none>}"
 
           KIND=none
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
@@ -98,32 +100,22 @@ jobs:
             PUBLISH=true; KIND=manual
             printf '%s\n' "$VER" > VERSION
           elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${{ inputs.upstream_release }}" = "true" ]; then
-            # Read the pin (REPO + REF) and the upstream's own VERSION.txt at that ref -- no clone.
-            REPO=$(sed -n 's/^REPO=//p' components/tailscale/version)
-            REF=$(sed -n 's/^REF=//p' components/tailscale/version)
-            [ -n "$REPO" ] && [ -n "$REF" ] || { echo "::error::malformed components/tailscale/version"; exit 1; }
-            slug=$(printf '%s' "$REPO" | sed -E 's#^https?://github.com/##; s#\.git$##')
-            UP=$(curl -fsSL "https://raw.githubusercontent.com/$slug/$REF/VERSION.txt" | tr -d '[:space:]')
-            case "$UP" in
-              [0-9]*.[0-9]*.[0-9]*) : ;;
-              *) echo "::error::could not read a sane upstream version from the pinned source (got '$UP')"; exit 1;;
-            esac
-            # Forward-only: the pin must be strictly ahead of what's shipped, so a pin edit pointing at
-            # an older or equal tag is a no-op rather than an auto-published downgrade.
-            newest=$(printf '%s\n%s\n' "$CUR_UP" "$UP" | sort -V | tail -1)
-            if [ "$UP" = "$CUR_UP" ] || [ "$newest" != "$UP" ]; then
-              echo "pin upstream $UP is not ahead of shipped $CUR_UP -- no release (build + gate only)."
-              VER="$CUR"; PUBLISH=false
+            ahead=yes
+            if [ -n "$SHIPPED_UP" ]; then
+              newest=$(printf '%s\n%s\n' "$SHIPPED_UP" "$UP" | sort -V | tail -1)
+              { [ "$UP" = "$SHIPPED_UP" ] || [ "$newest" != "$UP" ]; } && ahead=no
+            fi
+            if [ "$ahead" = no ]; then
+              echo "pin upstream $UP is not ahead of shipped $SHIPPED_UP -- no release (build + gate only)."
+              VER="$(sh "$MSC_SCRIPTS/resolve-version.sh")"; PUBLISH=false
             else
-              VER="${UP}-mavericks.1"; PUBLISH=true; KIND=upstream
-              printf '%s\n' "$VER" > VERSION
+              VER="$(sh "$MSC_SCRIPTS/resolve-version.sh")"; PUBLISH=true; KIND=upstream
             fi
           elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${{ inputs.local_release }}" = "true" ]; then
-            VER="${CUR_UP}-mavericks.$((CUR_N + 1))"
+            VER="$(sh "$MSC_SCRIPTS/resolve-version.sh" local)"
             PUBLISH=true; KIND=repackage
-            printf '%s\n' "$VER" > VERSION
           else
-            VER="$CUR"
+            VER="$(sh "$MSC_SCRIPTS/resolve-version.sh")"
             PUBLISH=false
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"

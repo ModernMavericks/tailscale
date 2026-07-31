@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
 
-# Single source of truth for the product version (feeds the .pkg name + release tag later). NOT passed
-# to project(VERSION ...): the mavericks scheme (1.98.8-mavericks.1) is not a valid CMake version.
-# Mirrors mavericks-container-tools / mavericks-golang.
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" MAVERICKS_TAILSCALE_VERSION LIMIT_COUNT 1)
 project(mavericks_tailscale LANGUAGES NONE)
 # LANGUAGES NONE: nothing is compiled by CMake here. The real 10.9/x86_64 enforcement is the go build
 # flags + the compat_guard gate. The ObjC Sparkle updater is built by shared-cmake's stage_updater.sh.
@@ -40,6 +36,14 @@ endif()
 # Shared machinery: compat_guard + the (later) updater/sign/floor scripts. The 10.9 SDK, target flags,
 # and legacy shim are supplied by the go126 toolchain's default CC wrapper (its go.env).
 find_package(MavericksSharedCMake REQUIRED)
+
+# The product version (feeds the .pkg name + the release tag). NOT passed to project(VERSION ...): the
+# mavericks scheme (1.102.0-mavericks.9) is not a valid CMake version.
+#
+# Derived, never committed: UPSTREAM_VERSION (written by build/derive-upstream-version.sh from the
+# pinned source's own VERSION.txt) plus the shipped tags decide it. The committed VERSION this
+# replaces still said 1.98.8-mavericks.1 while releases were at 1.102.0 -- two upstreams stale.
+mavericks_resolve_version(MAVERICKS_TAILSCALE_VERSION)
 
 # The Go compiler: the native go126 .pkg on the box, or go126-cross on PATH for a cross build.
 if(MAVERICKS_TAILSCALE_MODE STREQUAL "native")

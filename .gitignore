@@ -1,3 +1,5 @@
 build-native/
 build-cross/
 .srccache/
+/VERSION
+/UPSTREAM_VERSION

@@ -10,8 +10,9 @@ project(TailscaleUpdater LANGUAGES OBJC)
 find_package(MavericksSharedCMake REQUIRED)
 include(Mavericks)          # AppleClang gate + build conventions
 include(MavericksSparkle)   # the Sparkle updater .app builder
-# Single-source the version from the repo-root VERSION (this project's source dir is updater/).
-file(STRINGS "${CMAKE_SOURCE_DIR}/../VERSION" MAVERICKS_TAILSCALE_VERSION LIMIT_COUNT 1)
+# Single-source the version from the repo root (this project's source dir is updater/). Derived from
+# UPSTREAM_VERSION + the shipped tags, not read from a committed file.
+mavericks_resolve_version(MAVERICKS_TAILSCALE_VERSION ROOT "${CMAKE_SOURCE_DIR}/..")
 mavericks_add_updater_app(
   NAME TailscaleUpdater
   PRODUCT_NAME "Mavericks Tailscale"
