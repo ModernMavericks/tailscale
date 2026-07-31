@@ -11,11 +11,12 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track the tailscale source pin against upstream tailscale/tailscale release tags. A REF bump (e.g. v1.102.0 -> v1.104.0) waits for ci.yml (platformAutomerge:false) before auto-merge, then release-on-bump.yml auto-cuts the MM tag (forward-only).",
+      "description": "Track the tailscale source pin (REF + commit DIGEST) against upstream tailscale/tailscale. A REF bump (e.g. v1.102.0 -> v1.104.0) updates DIGEST too; clone_pinned.sh verifies the checkout against it. Waits for ci.yml (platformAutomerge:false) before auto-merge, then release-on-bump.yml auto-cuts the MM tag (forward-only).",
       "managerFilePatterns": ["/^components/tailscale/version$/"],
-      "matchStrings": ["REPO=https://github.com/(?<packageName>\\S+?)(?:\\.git)?\\s*\\nREF=(?<currentValue>v\\S+)"],
+      "matchStrings": ["REPO=(?<packageName>\\S+?)\\.git\\s+REF=(?<currentValue>v\\S+)\\s+DIGEST=(?<currentDigest>[0-9a-f]{40})"],
       "depNameTemplate": "tailscale-source",
-      "datasourceTemplate": "github-tags"
+      "datasourceTemplate": "git-refs",
+      "versioningTemplate": "semver"
     },
     {
       "customType": "regex",

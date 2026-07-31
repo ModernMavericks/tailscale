@@ -5,26 +5,31 @@
 # 10.9-SDK shims) is applied by build_tailscale.sh, which does all heavy work on LOCAL disk (repo on NFS).
 
 # Read the tailscale source pin (Renovate-tracked, components-style: components/tailscale/version).
-function(mavericks_tailscale_read_pin dir out_repo out_ref)
+# DIGEST (the commit sha) is what clone_pinned.sh verifies the checkout against; REF is the human label.
+function(mavericks_tailscale_read_pin dir out_repo out_ref out_digest)
   file(STRINGS "${dir}/version" _lines)
   foreach(_l IN LISTS _lines)
     if(_l MATCHES "^REPO=(.+)$")
       set(_repo "${CMAKE_MATCH_1}")
     elseif(_l MATCHES "^REF=(.+)$")
       set(_ref "${CMAKE_MATCH_1}")
+    elseif(_l MATCHES "^DIGEST=(.+)$")
+      set(_digest "${CMAKE_MATCH_1}")
     endif()
   endforeach()
-  set(${out_repo} "${_repo}" PARENT_SCOPE)
-  set(${out_ref}  "${_ref}"  PARENT_SCOPE)
+  set(${out_repo}   "${_repo}"   PARENT_SCOPE)
+  set(${out_ref}    "${_ref}"    PARENT_SCOPE)
+  set(${out_digest} "${_digest}" PARENT_SCOPE)
 endfunction()
 
-mavericks_tailscale_read_pin("${CMAKE_SOURCE_DIR}/components/tailscale" TS_REPO TS_REF)
+mavericks_tailscale_read_pin("${CMAKE_SOURCE_DIR}/components/tailscale" TS_REPO TS_REF TS_DIGEST)
 set(TS_SRC "${MAVERICKS_TAILSCALE_SRC_CACHE}/tailscale-${TS_REF}")
 
-# 1. Clone the pinned source (idempotent -- the script no-ops on a cache hit).
+# 1. Clone the pinned source, verified against the commit DIGEST (shared-cmake's clone_pinned.sh bails
+#    on a mismatch -- moved tag, MITM). Idempotent: no-ops on a cache hit.
 add_custom_command(
   OUTPUT "${TS_SRC}/.git/HEAD"
-  COMMAND sh "${CMAKE_SOURCE_DIR}/cmake/clone_pinned.sh" "${TS_REPO}" "${TS_REF}" "${TS_SRC}"
+  COMMAND sh "${MavericksSharedCMake_SCRIPTS}/clone_pinned.sh" "${TS_REPO}" "${TS_REF}" "${TS_DIGEST}" "${TS_SRC}"
   COMMENT "cloning tailscale ${TS_REF}"
   VERBATIM)
 
