@@ -27,7 +27,8 @@ done
 for f in "$TSD" "$TS" "$DAEMON" "$AGENT" "$DIST/scripts/preinstall" "$DIST/scripts/postinstall"; do
   [ -f "$f" ] || { echo "package_pkg: missing input: $f" >&2; exit 1; }; done
 for d in "$SYSTRAY" "$UPD_APP"; do [ -d "$d" ] || { echo "package_pkg: missing .app: $d" >&2; exit 1; }; done
-for h in stage_updater.sh set_install_floor.sh build_component_pkg.sh assert_pkg_installs_in_place.sh; do
+for h in stage_updater.sh set_install_floor.sh build_component_pkg.sh assert_pkg_installs_in_place.sh \
+         postinstall-stop-gui.sh assert_gui_relaunch_safe.sh; do
   [ -f "$MSC/$h" ] || { echo "package_pkg: shared helper missing: $MSC/$h" >&2; exit 1; }; done
 
 IDENT="dev.modernmavericks.tailscale"
@@ -51,10 +52,21 @@ install -m 0644 "$AGENT"  "$stage/Library/LaunchAgents/com.tailscale.systray.pli
 mkdir -p "$scripts"
 install -m 0755 "$DIST/scripts/preinstall"  "$scripts/preinstall"
 install -m 0755 "$DIST/scripts/postinstall" "$scripts/postinstall"
+# The shared stop-the-old-menu-bar-instance helper, sourced by the postinstall as stop-gui.sh so it is
+# present at install time on the target (a build-host script is not). Defines mav_stop_gui_instance.
+install -m 0644 "$MSC/postinstall-stop-gui.sh" "$scripts/stop-gui.sh"
 
 # --- updater .app + daily update-check LaunchAgent + the agent-load snippet (shared, hoisted) ---
 sh "$MSC/stage_updater.sh" --stage "$stage" --app "$UPD_APP" --app-dir "$UPD_APPDIR" \
   --agent-label "$AGENT_LABEL" --snippet-out "$scripts/agent-load.sh"
+
+# Gate the assembled postinstall before it ships: if it relaunches the menu-bar app it must stop the
+# old instance first (else two icons after an update). Then confirm the staged helper actually parses
+# and defines the function the postinstall sources -- a missing/broken snippet would silently regress.
+sh "$MSC/assert_gui_relaunch_safe.sh" "$scripts/postinstall" >&2
+sh -n "$scripts/postinstall" || { echo "package_pkg: assembled postinstall has a syntax error" >&2; exit 1; }
+sh -c '. "$1"; command -v mav_stop_gui_instance >/dev/null' _ "$scripts/stop-gui.sh" \
+  || { echo "package_pkg: staged stop-gui.sh does not define mav_stop_gui_instance" >&2; exit 1; }
 
 # --- flat component pkg (absolute layout -> install-location /). Strip NFS ._ sidecars first. ---
 # The shared helper forces install-in-place: BundleIsRelocatable=false so the menu-bar app + updater

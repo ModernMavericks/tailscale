@@ -13,17 +13,14 @@ CONSOLE_UID=$(stat -f %u /dev/console 2>/dev/null || echo 0)
 CONSOLE_USER=$(stat -f %Su /dev/console 2>/dev/null || echo root)
 if [ "${CONSOLE_UID:-0}" -gt 0 ] && [ "$CONSOLE_USER" != root ]; then
   launchctl asuser "$CONSOLE_UID" launchctl unload /Library/LaunchAgents/com.tailscale.systray.plist 2>/dev/null || true
-  # The old menu-bar process does NOT quit on unload's SIGTERM: the systray's signal handler runs
-  # cleanup but never calls systray.Quit(), so its icon lingers -- and on 10.9 the asuser-nested
-  # unload doesn't reliably signal it anyway. Without this, the `load -w` below starts the new
-  # instance beside the surviving old one and the user sees TWO menu-bar icons. Explicitly stop the
-  # old process (graceful TERM, then a guaranteed KILL) before starting the replacement. Match the
-  # executable name, NOT the .app path, so this also stops a systray still running from the
-  # pre-rename bundle (/Applications/Tailscale.app) across the app rename.
-  SYSTRAY_EXE='Contents/MacOS/tailscale-systray'
-  pkill -TERM -U "$CONSOLE_UID" -f "$SYSTRAY_EXE" 2>/dev/null || true
-  sleep 1
-  pkill -KILL -U "$CONSOLE_UID" -f "$SYSTRAY_EXE" 2>/dev/null || true
+  # The old menu-bar process does NOT quit on unload's SIGTERM (its handler cleans up but never calls
+  # systray.Quit()), and on 10.9 the asuser-nested unload doesn't reliably signal it anyway -- so
+  # without an explicit stop, the `load -w` below starts the new instance beside the surviving old one
+  # and the user sees TWO menu-bar icons. mav_stop_gui_instance (shared postinstall-stop-gui.sh, staged
+  # beside this script) does the TERM-then-KILL, matching the Contents/MacOS exec name so it also stops
+  # a systray still running from the pre-rename bundle across the app rename.
+  . "$(dirname "$0")/stop-gui.sh"
+  mav_stop_gui_instance 'Contents/MacOS/tailscale-systray' "$CONSOLE_UID"
   # One-time cleanup of the pre-rename bundle, but ONLY if it is ours (identity-checked, so we never
   # delete an unrelated /Applications/Tailscale.app).
   OLD_APP="/Applications/Tailscale.app"
