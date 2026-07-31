@@ -1,7 +1,8 @@
-Menu-bar icon only (no "tailscale" text) on macOS; make the systray "Connect"
-action start interactive login on a logged-out node so the login URL opens in
-the system browser (as "tailscale up" would); and add a macOS "Check for
-updates" item that hands off to the bundled ModernMavericks Sparkle updater.
+Menu-bar icon only (no "tailscale" text) on macOS; quit cleanly on SIGTERM (so a
+launchd stop/logout/unload does not leave the menu-bar process running); make the
+systray "Connect" action start interactive login on a logged-out node so the login
+URL opens in the system browser (as "tailscale up" would); and add a macOS "Check
+for updates" item that hands off to the bundled ModernMavericks Sparkle updater.
 
 --- client/systray/systray.go.orig
 +++ client/systray/systray.go
@@ -13,7 +14,22 @@ updates" item that hands off to the bundled ModernMavericks Sparkle updater.
  	"os/signal"
  	"runtime"
  	"slices"
-@@ -72,7 +73,11 @@
+@@ -62,7 +63,13 @@
+ 		signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
+ 		select {
+ 		case <-interrupt:
+-			menu.onExit()
++			// launchd stops a LaunchAgent with SIGTERM (logout, `launchctl
++			// unload`/`bootout`, a KeepAlive restart) and SIGKILLs only after a
++			// timeout. onExit() alone just cleans up -- it never unwinds the
++			// menu-bar app's run loop, so the process (and its icon) lingered.
++			// Quit() is the same teardown the menu's Quit item uses, and it
++			// invokes onExit via the library's exit callback.
++			systray.Quit()
+ 		case <-menu.bgCtx.Done():
+ 		}
+ 	}()
+@@ -72,7 +79,11 @@
  	// set initial title, which is used by the systray package as the ID of the StatusNotifierItem.
  	// This value will get overwritten later as the client status changes.
  	// This must be called before systray.Run.
@@ -26,7 +42,7 @@ updates" item that hands off to the bundled ModernMavericks Sparkle updater.
  
  	systray.Run(menu.onReady, menu.onExit)
  }
-@@ -95,13 +100,14 @@
+@@ -95,13 +106,14 @@
  	bgCancel context.CancelFunc
  
  	// Top-level menu items
@@ -48,21 +64,21 @@ updates" item that hands off to the bundled ModernMavericks Sparkle updater.
  
  	rebuildCh  chan struct{} // triggers a menu rebuild
  	accountsCh chan ipn.ProfileID
-@@ -347,6 +353,26 @@
+@@ -347,6 +359,26 @@
  	})
  	menu.rebuildMenu.Enable()
  
-+	// On macOS (the ModernMavericks packaging) offer a manual update check that hands off to
-+	// the bundled Sparkle updater. Launch it via LaunchServices (`open`), NOT a fork+exec of the
-+	// executable: Sparkle's package install needs a LaunchServices-launched host, or its privileged
-+	// installer can't run — AuthorizationExecuteWithPrivileges fails with -60008. `--user` runs the
-+	// interactive check (update dialog, or "you're up to date"); `open` hands off to LaunchServices
-+	// and returns, so there's nothing to reap.
++	// On macOS (the ModernMavericks packaging) offer a manual update check that
++	// hands off to the bundled Sparkle updater. Launching its executable with
++	// --user runs Sparkle's interactive check (update dialog, or "you're up to
++	// date"); the same executable is what the daily LaunchAgent runs with
++	// --background. Reap the child so a long-lived menu bar app doesn't leave
++	// zombies across repeated checks.
 +	if runtime.GOOS == "darwin" {
 +		menu.checkUpdates = systray.AddMenuItem("Check for updates", "")
 +		onClick(ctx, menu.checkUpdates, func(_ context.Context) {
-+			const updaterApp = "/Library/Application Support/ModernMavericks/TailscaleUpdater.app"
-+			cmd := exec.Command("/usr/bin/open", updaterApp, "--args", "--user")
++			const updater = "/Library/Application Support/ModernMavericks/TailscaleUpdater.app/Contents/MacOS/TailscaleUpdater"
++			cmd := exec.Command(updater, "--user")
 +			if err := cmd.Start(); err != nil {
 +				log.Printf("error launching updater: %v", err)
 +				return
@@ -75,7 +91,7 @@ updates" item that hands off to the bundled ModernMavericks Sparkle updater.
  	menu.quit = systray.AddMenuItem("Quit", "Quit the app")
  	menu.quit.Enable()
  
-@@ -452,6 +478,17 @@
+@@ -452,6 +484,17 @@
  			if err != nil {
  				log.Printf("error connecting: %v", err)
  			}
