@@ -27,7 +27,7 @@ done
 for f in "$TSD" "$TS" "$DAEMON" "$AGENT" "$DIST/scripts/preinstall" "$DIST/scripts/postinstall"; do
   [ -f "$f" ] || { echo "package_pkg: missing input: $f" >&2; exit 1; }; done
 for d in "$SYSTRAY" "$UPD_APP"; do [ -d "$d" ] || { echo "package_pkg: missing .app: $d" >&2; exit 1; }; done
-for h in stage_updater.sh set_install_floor.sh; do
+for h in stage_updater.sh set_install_floor.sh build_component_pkg.sh assert_pkg_installs_in_place.sh; do
   [ -f "$MSC/$h" ] || { echo "package_pkg: shared helper missing: $MSC/$h" >&2; exit 1; }; done
 
 IDENT="dev.modernmavericks.tailscale"
@@ -57,13 +57,19 @@ sh "$MSC/stage_updater.sh" --stage "$stage" --app "$UPD_APP" --app-dir "$UPD_APP
   --agent-label "$AGENT_LABEL" --snippet-out "$scripts/agent-load.sh"
 
 # --- flat component pkg (absolute layout -> install-location /). Strip NFS ._ sidecars first. ---
+# The shared helper forces install-in-place: BundleIsRelocatable=false so the menu-bar app + updater
+# land at their DECLARED paths (never relocated onto a same-identifier bundle already on disk), and
+# BundleIsVersionChecked=false so an update never skips a component whose on-disk version looks newer.
 find "$stage" -name '._*' -delete 2>/dev/null || true
-pkgbuild --root "$stage" --identifier "$IDENT" --version "$VER" \
-         --scripts "$scripts" --install-location / "$comp" >&2
+sh "$MSC/build_component_pkg.sh" --root "$stage" --identifier "$IDENT" --version "$VER" \
+  --install-location / --scripts "$scripts" --out "$comp" >&2
 
 # --- product archive with the hard 10.9.5 OS floor (shared helper) ---
 sh "$MSC/set_install_floor.sh" \
   --identifier "$IDENT" --title "Tailscale for Mavericks $VER" \
   --component "$comp" --out "$OUT" --require-scripts --host-arch x86_64 >&2
+
+# Gate the shipped product archive: every bundle must install in place (no relocation, no version-skip).
+sh "$MSC/assert_pkg_installs_in_place.sh" "$OUT" >&2
 
 echo "$OUT"
