@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.9 CACHE STRING "updater runs on the 10.9 box")
 set(CMAKE_OSX_ARCHITECTURES x86_64 CACHE STRING "Intel-only (10.9)")
 project(TailscaleUpdater LANGUAGES OBJC)
-find_package(MavericksSharedCMake REQUIRED)
+find_package(MavericksShipyard REQUIRED)
 include(Mavericks)          # AppleClang gate + build conventions
 include(MavericksSparkle)   # the Sparkle updater .app builder
 # Single-source the version from the repo root (this project's source dir is updater/). Derived from

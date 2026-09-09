@@ -31,7 +31,7 @@ if [ "${CONSOLE_UID:-0}" -gt 0 ] && [ "$CONSOLE_USER" != root ]; then
   launchctl asuser "$CONSOLE_UID" launchctl load -w /Library/LaunchAgents/com.tailscale.systray.plist 2>/dev/null || true
 fi
 
-# Daily update-check agent: load logic rendered by mavericks-shared-cmake's stage_updater.sh, shipped
+# Daily update-check agent: load logic rendered by mavericks-shipyard's stage_updater.sh, shipped
 # beside this script as agent-load.sh (absent in a no-updater build). Sourced: no exit, MAV_-prefixed.
 AGENT_LOAD="$(dirname "$0")/agent-load.sh"
 [ -f "$AGENT_LOAD" ] && . "$AGENT_LOAD"

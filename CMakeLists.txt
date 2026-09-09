@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 
 project(mavericks_tailscale LANGUAGES NONE)
 # LANGUAGES NONE: nothing is compiled by CMake here. The real 10.9/x86_64 enforcement is the go build
-# flags + the compat_guard gate. The ObjC Sparkle updater is built by shared-cmake's stage_updater.sh.
+# flags + the compat_guard gate. The ObjC Sparkle updater is built by shipyard's stage_updater.sh.
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.9)
 set(CMAKE_OSX_ARCHITECTURES x86_64)
 
@@ -35,7 +35,7 @@ endif()
 
 # Shared machinery: compat_guard + the (later) updater/sign/floor scripts. The 10.9 SDK, target flags,
 # and legacy shim are supplied by the go126 toolchain's default CC wrapper (its go.env).
-find_package(MavericksSharedCMake REQUIRED)
+find_package(MavericksShipyard REQUIRED)
 
 # The product version (feeds the .pkg name + the release tag). NOT passed to project(VERSION ...): the
 # mavericks scheme (1.102.0-mavericks.9) is not a valid CMake version.

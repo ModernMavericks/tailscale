@@ -9,27 +9,27 @@
 #     --updater-app APP.app --daemon-plist PLIST --systray-agent PLIST --dist DIR [--msc-scripts DIR]
 set -eu
 export COPYFILE_DISABLE=1
-OUT=""; VER=""; TSD=""; TS=""; SYSTRAY=""; UPD_APP=""; DAEMON=""; AGENT=""; DIST=""; MSC="${MSC_SCRIPTS:-}"
+OUT=""; VER=""; TSD=""; TS=""; SYSTRAY=""; UPD_APP=""; DAEMON=""; AGENT=""; DIST=""; SHIPYARD="${SHIPYARD_SCRIPTS:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2;;            --version) VER="$2"; shift 2;;
     --tailscaled) TSD="$2"; shift 2;;     --tailscale) TS="$2"; shift 2;;
     --systray-app) SYSTRAY="$2"; shift 2;; --updater-app) UPD_APP="$2"; shift 2;;
     --daemon-plist) DAEMON="$2"; shift 2;; --systray-agent) AGENT="$2"; shift 2;;
-    --dist) DIST="$2"; shift 2;;          --msc-scripts) MSC="$2"; shift 2;;
+    --dist) DIST="$2"; shift 2;;          --msc-scripts) SHIPYARD="$2"; shift 2;;
     *) echo "package_pkg: unknown arg: $1" >&2; exit 2;;
   esac
 done
 [ -n "$OUT" ] && [ -n "$VER" ] && [ -n "$TSD" ] && [ -n "$TS" ] && [ -n "$SYSTRAY" ] \
   && [ -n "$UPD_APP" ] && [ -n "$DAEMON" ] && [ -n "$AGENT" ] && [ -n "$DIST" ] \
   || { echo "package_pkg: need --out --version --tailscaled --tailscale --systray-app --updater-app --daemon-plist --systray-agent --dist" >&2; exit 2; }
-[ -n "$MSC" ] || { echo "package_pkg: MSC_SCRIPTS unset (install mavericks-shared-cmake, or pass --msc-scripts)" >&2; exit 2; }
+[ -n "$SHIPYARD" ] || { echo "package_pkg: SHIPYARD_SCRIPTS unset (install mavericks-shipyard, or pass --msc-scripts)" >&2; exit 2; }
 for f in "$TSD" "$TS" "$DAEMON" "$AGENT" "$DIST/scripts/preinstall" "$DIST/scripts/postinstall"; do
   [ -f "$f" ] || { echo "package_pkg: missing input: $f" >&2; exit 1; }; done
 for d in "$SYSTRAY" "$UPD_APP"; do [ -d "$d" ] || { echo "package_pkg: missing .app: $d" >&2; exit 1; }; done
 for h in stage_updater.sh set_install_floor.sh build_component_pkg.sh assert_pkg_installs_in_place.sh \
          postinstall-stop-gui.sh assert_gui_relaunch_safe.sh; do
-  [ -f "$MSC/$h" ] || { echo "package_pkg: shared helper missing: $MSC/$h" >&2; exit 1; }; done
+  [ -f "$SHIPYARD/$h" ] || { echo "package_pkg: shared helper missing: $SHIPYARD/$h" >&2; exit 1; }; done
 
 IDENT="dev.modernmavericks.tailscale"
 AGENT_LABEL="com.tailscale.updatecheck"
@@ -54,16 +54,16 @@ install -m 0755 "$DIST/scripts/preinstall"  "$scripts/preinstall"
 install -m 0755 "$DIST/scripts/postinstall" "$scripts/postinstall"
 # The shared stop-the-old-menu-bar-instance helper, sourced by the postinstall as stop-gui.sh so it is
 # present at install time on the target (a build-host script is not). Defines mav_stop_gui_instance.
-install -m 0644 "$MSC/postinstall-stop-gui.sh" "$scripts/stop-gui.sh"
+install -m 0644 "$SHIPYARD/postinstall-stop-gui.sh" "$scripts/stop-gui.sh"
 
 # --- updater .app + daily update-check LaunchAgent + the agent-load snippet (shared, hoisted) ---
-sh "$MSC/stage_updater.sh" --stage "$stage" --app "$UPD_APP" --app-dir "$UPD_APPDIR" \
+sh "$SHIPYARD/stage_updater.sh" --stage "$stage" --app "$UPD_APP" --app-dir "$UPD_APPDIR" \
   --agent-label "$AGENT_LABEL" --snippet-out "$scripts/agent-load.sh"
 
 # Gate the assembled postinstall before it ships: if it relaunches the menu-bar app it must stop the
 # old instance first (else two icons after an update). Then confirm the staged helper actually parses
 # and defines the function the postinstall sources -- a missing/broken snippet would silently regress.
-sh "$MSC/assert_gui_relaunch_safe.sh" "$scripts/postinstall" >&2
+sh "$SHIPYARD/assert_gui_relaunch_safe.sh" "$scripts/postinstall" >&2
 sh -n "$scripts/postinstall" || { echo "package_pkg: assembled postinstall has a syntax error" >&2; exit 1; }
 sh -c '. "$1"; command -v mav_stop_gui_instance >/dev/null' _ "$scripts/stop-gui.sh" \
   || { echo "package_pkg: staged stop-gui.sh does not define mav_stop_gui_instance" >&2; exit 1; }
@@ -73,15 +73,15 @@ sh -c '. "$1"; command -v mav_stop_gui_instance >/dev/null' _ "$scripts/stop-gui
 # land at their DECLARED paths (never relocated onto a same-identifier bundle already on disk), and
 # BundleIsVersionChecked=false so an update never skips a component whose on-disk version looks newer.
 find "$stage" -name '._*' -delete 2>/dev/null || true
-sh "$MSC/build_component_pkg.sh" --root "$stage" --identifier "$IDENT" --version "$VER" \
+sh "$SHIPYARD/build_component_pkg.sh" --root "$stage" --identifier "$IDENT" --version "$VER" \
   --install-location / --scripts "$scripts" --out "$comp" >&2
 
 # --- product archive with the hard 10.9.5 OS floor (shared helper) ---
-sh "$MSC/set_install_floor.sh" \
+sh "$SHIPYARD/set_install_floor.sh" \
   --identifier "$IDENT" --title "Tailscale for Mavericks $VER" \
   --component "$comp" --out "$OUT" --require-scripts --host-arch x86_64 >&2
 
 # Gate the shipped product archive: every bundle must install in place (no relocation, no version-skip).
-sh "$MSC/assert_pkg_installs_in_place.sh" "$OUT" >&2
+sh "$SHIPYARD/assert_pkg_installs_in_place.sh" "$OUT" >&2
 
 echo "$OUT"

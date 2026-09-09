@@ -26,16 +26,16 @@ jobs:
           fetch-depth: 0   # cmake resolves the version from the shipped tags; without them CI would
                            # label every build -mavericks.1 and hide what it is really building
 
-      # shared-cmake self-registers in the CMake user package registry; consumed via find_package.
-      - name: Install mavericks-shared-cmake
-        uses: ModernMavericks/shared-cmake/.github/actions/install@v1
+      # shipyard self-registers in the CMake user package registry; consumed via find_package.
+      - name: Install mavericks-shipyard
+        uses: ModernMavericks/shipyard/.github/actions/install@v1
 
       # The ingredient pin list is derived from repackage-on-ingredient-bump.yml's own paths, so the
       # repackage trigger and the release notes can't drift -- but a glob that matches nothing would
       # silently mean no repackage and thinner notes. Fail here instead.
       - name: Guard the ingredient pin declaration
         run: |
-          SCR="$(cat "$HOME/.cmake/packages/MavericksSharedCMake/"* | head -1)/scripts"
+          SCR="$(cat "$HOME/.cmake/packages/MavericksShipyard/"* | head -1)/scripts"
           sh "$SCR/check-ingredient-pins.sh"
 
       # The 10.9-correct Go toolchain (mavericks-golang go126 cross .pkg; its go.env CC wrapper supplies

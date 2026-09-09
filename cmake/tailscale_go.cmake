@@ -25,11 +25,11 @@ endfunction()
 mavericks_tailscale_read_pin("${CMAKE_SOURCE_DIR}/components/tailscale" TS_REPO TS_REF TS_DIGEST)
 set(TS_SRC "${MAVERICKS_TAILSCALE_SRC_CACHE}/tailscale-${TS_REF}")
 
-# 1. Clone the pinned source, verified against the commit DIGEST (shared-cmake's clone_pinned.sh bails
+# 1. Clone the pinned source, verified against the commit DIGEST (shipyard's clone_pinned.sh bails
 #    on a mismatch -- moved tag, MITM). Idempotent: no-ops on a cache hit.
 add_custom_command(
   OUTPUT "${TS_SRC}/.git/HEAD"
-  COMMAND sh "${MavericksSharedCMake_SCRIPTS}/clone_pinned.sh" "${TS_REPO}" "${TS_REF}" "${TS_DIGEST}" "${TS_SRC}"
+  COMMAND sh "${MavericksShipyard_SCRIPTS}/clone_pinned.sh" "${TS_REPO}" "${TS_REF}" "${TS_DIGEST}" "${TS_SRC}"
   COMMENT "cloning tailscale ${TS_REF}"
   VERBATIM)
 
@@ -54,10 +54,10 @@ add_custom_command(
 add_custom_target(tailscale_binaries ALL DEPENDS ${TS_BINS})
 
 # 3. Compat gate per binary: x86_64 + min-10.9 + _clock_gettime defined + no post-10.9 imports.
-#    assert_binary_compatible.sh is the shared-cmake gate (honors MAVERICKS_REQUIRE_DEFINED_SYMBOLS);
+#    assert_binary_compatible.sh is the shipyard gate (honors MAVERICKS_REQUIRE_DEFINED_SYMBOLS);
 #    the same script container-tools uses for its Go binaries.
 foreach(_b tailscaled tailscale tailscale-systray)
   add_test(NAME compat_guard_${_b}
     COMMAND ${CMAKE_COMMAND} -E env MAVERICKS_REQUIRE_DEFINED_SYMBOLS=_clock_gettime
-      sh "${MavericksSharedCMake_SCRIPTS}/assert_binary_compatible.sh" "${TS_GOBIN}/${_b}")
+      sh "${MavericksShipyard_SCRIPTS}/assert_binary_compatible.sh" "${TS_GOBIN}/${_b}")
 endforeach()
