@@ -219,10 +219,12 @@ jobs:
       # sign_and_appcast.sh's --notes-file has a non-empty file. (A tag release already validated its
       # notes exist in build-macos, so the stub only ever fires for a dispatch-cut release.)
       #
-      # Then append the FACTS: which ingredient pins moved since the last release. A repackage exists
-      # to ship a new input, so naming that input is the whole point of its notes -- but notes are
-      # prose, so every step here tolerates failure rather than blocking a release.
-      - name: Compose release notes (stub if absent, + which ingredients changed)
+      # Then append the FACTS: for a new upstream, a link to that version's entry in tailscale's own
+      # changelog (build/upstream-release-notes-url.sh finds it); and which ingredient pins moved
+      # since the last release. A repackage exists to ship a new input, so naming that input is the
+      # whole point of its notes -- but notes are prose, so every step here tolerates failure rather
+      # than blocking a release.
+      - name: Compose release notes (stub if absent, + upstream link, + which ingredients changed)
         env:
           VER: ${{ needs.build-macos.outputs.version }}
           KIND: ${{ needs.build-macos.outputs.kind }}
@@ -247,6 +249,8 @@ jobs:
               fi
             } > "$NOTES"
           fi
+          UPSEC="$(sh "$SCR/upstream-notes.sh" "$VER" || true)"
+          [ -z "$UPSEC" ] || printf '\n%s\n' "$UPSEC" >> "$NOTES"
           PREV="$(sh "$SCR/previous-release-tag.sh" "$VER" || true)"
           PINS="$(sh "$SCR/ingredient-pins.sh" || true)"
           if [ -n "$PREV" ] && [ -n "$PINS" ]; then

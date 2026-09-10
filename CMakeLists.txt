@@ -59,3 +59,8 @@ include(ExternalProject)
 enable_testing()
 
 include(cmake/tailscale_go.cmake)   # cross-builds tailscaled / tailscale / tailscale-systray + compat_guard
+
+# Release notes link upstream's changelog entry, which is anchored by date: prove the lookup against
+# a fixture shaped like the real page (no network).
+add_test(NAME upstream_release_notes_url
+  COMMAND sh "${CMAKE_SOURCE_DIR}/tests/upstream-release-notes-url-test.sh")
