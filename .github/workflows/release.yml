@@ -329,7 +329,7 @@ jobs:
   # release; it cannot run the scan itself (reading job logs needs actions: read).
   # needs build-macos too, only so the `if:` below can read its outputs.
   scan:
-    if: needs.build-macos.outputs.publish == 'true'
+    if: always() && (needs.build-macos.outputs.publish == 'true')   # a build that fails after signing left logs too; scan them
     needs: [build-macos, package]
     permissions:
       actions: read     # this run's job logs
