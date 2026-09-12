@@ -57,7 +57,6 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
       publish: ${{ steps.ver.outputs.publish }}
-      kind: ${{ steps.ver.outputs.kind }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,7 +65,9 @@ jobs:
       - name: Install mavericks-shipyard
         uses: ModernMavericks/shipyard/.github/actions/install@v1
 
-      # Decides three things: what VER is, whether this run publishes, and what kind of release it is.
+      # Decides two things: what VER is, and whether this run publishes. release-notes.sh (in the
+      # package job) works out new-upstream vs. repackage vs. packaging-only itself, from the tags
+      # and the ingredient pins, so this step no longer needs to track a release "kind".
       #
       # THE SHIPPED STATE LIVES IN TAGS. Nothing here is committed back -- branch protection requires
       # a status check no fresh bot commit can have -- so the version is derived, never read from a
@@ -102,12 +103,11 @@ jobs:
           done
           echo "pin upstream: $UP    newest shipped upstream: ${SHIPPED_UP:-<none>}"
 
-          KIND=none
           if [ "${GITHUB_REF_TYPE}" = tag ]; then
             VER="${GITHUB_REF_NAME}"
             if [ ! -s "release-notes/$VER.md" ]; then
               echo "::error::release-notes/$VER.md missing or empty"; exit 1; fi
-            PUBLISH=true; KIND=manual
+            PUBLISH=true
             printf '%s\n' "$VER" > VERSION
           elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${{ inputs.upstream_release }}" = "true" ]; then
             ahead=yes
@@ -119,19 +119,18 @@ jobs:
               echo "pin upstream $UP is not ahead of shipped $SHIPPED_UP -- no release (build + gate only)."
               VER="$(sh "$SHIPYARD_SCRIPTS/resolve-version.sh")"; PUBLISH=false
             else
-              VER="$(sh "$SHIPYARD_SCRIPTS/resolve-version.sh")"; PUBLISH=true; KIND=upstream
+              VER="$(sh "$SHIPYARD_SCRIPTS/resolve-version.sh")"; PUBLISH=true
             fi
           elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${{ inputs.local_release }}" = "true" ]; then
             VER="$(sh "$SHIPYARD_SCRIPTS/resolve-version.sh" local)"
-            PUBLISH=true; KIND=repackage
+            PUBLISH=true
           else
             VER="$(sh "$SHIPYARD_SCRIPTS/resolve-version.sh")"
             PUBLISH=false
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
-          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
-          echo "version=$VER publish=$PUBLISH kind=$KIND"
+          echo "version=$VER publish=$PUBLISH"
 
       - name: Install patched Go (mavericks-golang cross toolchain)
         run: |
@@ -213,53 +212,23 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: packaging-inputs, path: dl }
 
-      # This job's checkout is fresh (a separate runner), so it does NOT see the VERSION mutation
-      # build-macos made for a local_release repackage -- use the version build-macos decided. For the
-      # same reason a freshly-cut repackage has no committed release-notes/$VER.md; stub it so
-      # sign_and_appcast.sh's --notes-file has a non-empty file. (A tag release already validated its
-      # notes exist in build-macos, so the stub only ever fires for a dispatch-cut release.)
-      #
-      # Then append the FACTS: for a new upstream, a link to that version's entry in tailscale's own
-      # changelog (build/upstream-release-notes-url.sh finds it); and which ingredient pins moved
-      # since the last release. A repackage exists to ship a new input, so naming that input is the
-      # whole point of its notes -- but notes are prose, so every step here tolerates failure rather
-      # than blocking a release.
-      - name: Compose release notes (stub if absent, + upstream link, + which ingredients changed)
+      # Generate the single notes file ONCE: the Sparkle appcast <description> and the GitHub Release
+      # body are the same bytes, read twice (this step below, and publish-release.yml from the
+      # uploaded artifact). The generator decides new-upstream vs. repackage vs. packaging-only, and
+      # which ingredient pins moved, itself -- from the tags and repackage-on-ingredient-bump.yml's
+      # own `paths:` list -- so nothing here says which kind of release this is. This job's checkout
+      # is fresh (a separate runner), so it does NOT see the VERSION mutation build-macos made for a
+      # local_release repackage -- use the version build-macos decided.
+      - name: Generate release notes
         env:
           VER: ${{ needs.build-macos.outputs.version }}
-          KIND: ${{ needs.build-macos.outputs.kind }}
         run: |
           set -eu
-          SCR="$(cat "$HOME/.cmake/packages/MavericksShipyard/"* | head -1)/scripts"
-          NOTES="release-notes/$VER.md"
-          if [ ! -s "$NOTES" ]; then
-            mkdir -p release-notes
-            UP="${VER%%-mavericks.*}"
-            {
-              echo "ModernMavericks Tailscale $VER."
-              echo
-              if [ "$KIND" = upstream ]; then
-                echo "- Tracks upstream Tailscale **$UP**, built with the ModernMavericks go126"
-                echo "  toolchain (x86_64, minimum-10.9, compat_guard-gated)."
-                echo "- Automatically cut from the tailscale source pin bump."
-              else
-                echo "- Repackage of upstream Tailscale **$UP**, rebuilt with updated build"
-                echo "  ingredients. No upstream Tailscale change."
-                echo "- Automatically cut from a build-ingredient bump."
-              fi
-            } > "$NOTES"
-          fi
-          UPSEC="$(sh "$SCR/upstream-notes.sh" "$VER" || true)"
-          [ -z "$UPSEC" ] || printf '\n%s\n' "$UPSEC" >> "$NOTES"
-          PREV="$(sh "$SCR/previous-release-tag.sh" "$VER" || true)"
-          PINS="$(sh "$SCR/ingredient-pins.sh" || true)"
-          if [ -n "$PREV" ] && [ -n "$PINS" ]; then
-            SECTION="$(sh "$SCR/ingredient-notes.sh" "$PREV" $PINS || true)"
-            [ -z "$SECTION" ] || printf '\n%s\n' "$SECTION" >> "$NOTES"
-          fi
           mkdir -p dist
-          cp "$NOTES" dist/RELEASE_NOTES.md   # becomes the Release body; not attached as an asset
-          echo "=== $NOTES ==="; cat "$NOTES"
+          sh "$SHIPYARD_SCRIPTS/release-notes.sh" \
+            --tag "$VER" --version "$VER" \
+            --product Tailscale --min-os 10.9.5 --out dist/RELEASE_NOTES.md
+          echo "=== dist/RELEASE_NOTES.md ==="; cat dist/RELEASE_NOTES.md
 
       - name: Assemble + sign the .pkg, render the appcast
         env:
@@ -297,7 +266,7 @@ jobs:
           sh "$SH/sign_and_appcast.sh" \
             --channel-title "Tailscale for Mavericks" \
             --version "$VER" --pkg-url "$URL" --min-os 10.9.5 \
-            --notes-file "release-notes/$VER.md" --pkg "$PKG" > dist/appcast.xml
+            --notes-file dist/RELEASE_NOTES.md --pkg "$PKG" > dist/appcast.xml
           echo "=== appcast.xml ==="; cat dist/appcast.xml
       # No SHA256SUMS here: publish-release.yml regenerates it over everything it attaches, so the
       # checksums cover the appcast too and no repo hand-rolls that step.
